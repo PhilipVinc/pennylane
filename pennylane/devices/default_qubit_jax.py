@@ -169,7 +169,16 @@ class DefaultQubitJax(DefaultQubit):
         del self._apply_ops["PauliY"]
         del self._apply_ops["Hadamard"]
         del self._apply_ops["CZ"]
+        self.__prng_key = None
         self._prng_key = prng_key
+
+    @property
+    def _prng_key(self):
+        return self.__prng_key
+    
+    @_prng_key.setter
+    def _prng_key(self, val):
+        self.__prng_key = val
 
     @classmethod
     def capabilities(cls):

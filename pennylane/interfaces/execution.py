@@ -126,7 +126,9 @@ def cache_execute(fn: Callable, cache, pass_kwargs=False, return_tuple=True, exp
         original_fn = fn
 
         def fn(tapes: Sequence[QuantumTape], **kwargs):  # pylint: disable=function-redefined
+            print("cache execute expanding function for tapes", tapes, kwargs)
             tapes = [expand_fn(tape) for tape in tapes]
+            print(f"calling {original_fn=} with {tapes=}")
             return original_fn(tapes, **kwargs)
 
     @wraps(fn)
@@ -193,7 +195,7 @@ def cache_execute(fn: Callable, cache, pass_kwargs=False, return_tuple=True, exp
                 # Tape does not exist within the cache, store the tape
                 # for execution via the execution function.
                 execution_tapes[i] = tape
-
+        print("doing some stuff in the wrapper")
         # if there are no execution tapes, simply return!
         if not execution_tapes:
             if not repeated:
@@ -203,7 +205,7 @@ def cache_execute(fn: Callable, cache, pass_kwargs=False, return_tuple=True, exp
         else:
             # execute all unique tapes that do not exist in the cache
             res = fn(execution_tapes.values(), **kwargs)
-
+        print("im here in the wrapper")
         final_res = []
 
         for i, tape in enumerate(tapes):
@@ -220,7 +222,7 @@ def cache_execute(fn: Callable, cache, pass_kwargs=False, return_tuple=True, exp
                 r = res.pop(0)
                 final_res.append(r)
                 cache[hashes[i]] = r
-
+        print("returning from the wrapper")
         return (final_res, []) if return_tuple else final_res
 
     wrapper.fn = fn

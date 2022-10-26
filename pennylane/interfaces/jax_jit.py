@@ -20,6 +20,7 @@ to a PennyLane Device class.
 import jax
 import jax.numpy as jnp
 from jax.experimental import host_callback
+from jax import pure_callback
 
 import numpy as np
 import pennylane as qml
@@ -136,22 +137,32 @@ def _execute(
     total_params = np.sum([len(p) for p in params])
 
     # Copy a given tape with operations and set parameters
-    def cp_tape(t, a):
+    def cp_tape(t, a=None):
         tc = t.copy(copy_operations=True)
         tc.set_parameters(a)
         return tc
+    
+    tapes_orig = tapes 
+    _null_params = jax.tree_map(lambda x: None, params)
+    tapes = [cp_tape(t, a) for t, a in zip(tapes_orig, _null_params)]
 
     @jax.custom_vjp
     def wrapped_exec(params):
         def wrapper(p):
             """Compute the forward pass."""
+            print("in wrapper, p = ", p)
             new_tapes = [cp_tape(t, a) for t, a in zip(tapes, p)]
+            print("after tapes are copied haha")
             with qml.tape.Unwrap(*new_tapes):
+                print(f"start unwrapping {execute_fn}")
                 res, _ = execute_fn(new_tapes, **gradient_kwargs)
+                print("done unwrapping")
+            print("after unwrapping")
             return res
 
         shape_dtype_structs = _extract_shape_dtype_structs(tapes, device)
-        res = host_callback.call(wrapper, params, result_shape=shape_dtype_structs)
+        #res = host_callback.call(wrapper, params, result_shape=shape_dtype_structs)
+        res = pure_callback(wrapper, shape_dtype_structs, params)
         return res
 
     def wrapped_exec_fwd(params):
@@ -165,8 +176,9 @@ def _execute(
                 """Compute the VJP in a non-differentiable manner."""
                 p = args[:-1]
                 dy = args[-1]
-
+                print("in non_diff wrapper", tapes)
                 new_tapes = [cp_tape(t, a) for t, a in zip(tapes, p)]
+                print("before batch vjp")
                 vjp_tapes, processing_fn = qml.gradients.batch_vjp(
                     new_tapes,
                     dy,
@@ -174,9 +186,11 @@ def _execute(
                     reduction="append",
                     gradient_kwargs=gradient_kwargs,
                 )
-
+                print("after batch vjp, ", vjp_tapes)
                 partial_res = execute_fn(vjp_tapes)[0]
+                print("after execute")
                 res = processing_fn(partial_res)
+                print("after process")
                 return np.concatenate(res)
 
             args = tuple(params) + (g,)
@@ -218,9 +232,10 @@ def _execute(
 
         shapes = [
             jax.ShapeDtypeStruct((len(t.measurements), len(p)), dtype)
-            for t, p in zip(tapes, params)
+            for t, p in zip(tapes_orig, params)
         ]
-        jacs = host_callback.call(jacs_wrapper, params, result_shape=shapes)
+        #jacs = host_callback.call(jacs_wrapper, params, result_shape=shapes)
+        jacs = pure_callback(jacs_wrapper, shapes, params)
         vjps = [qml.gradients.compute_vjp(d, jac) for d, jac in zip(g, jacs)]
         res = [[jnp.array(p) for p in v] for v in vjps]
         return (tuple(res),)
@@ -267,10 +282,15 @@ def _execute_with_fwd(
             o = jax.ShapeDtypeStruct(tuple(shape), _dtype)
             jacobian_shape.append(o)
 
-        res, jacs = host_callback.call(
+        # res, jacs = host_callback.call(
+        #     wrapper,
+        #     params,
+        #     result_shape=tuple([fwd_shape_dtype_struct, jacobian_shape]),
+        # )
+        res, jacs = pure_callback(
             wrapper,
+            tuple([fwd_shape_dtype_struct, jacobian_shape]),
             params,
-            result_shape=tuple([fwd_shape_dtype_struct, jacobian_shape]),
         )
         return res, jacs
 
