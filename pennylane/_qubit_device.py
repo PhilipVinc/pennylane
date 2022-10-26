@@ -366,7 +366,7 @@ class QubitDevice(Device):
         Returns:
             array[float]: measured value(s)
         """
-        print(f"  inside circuit execute for {self=}.{circuit=}")
+        print(f"     inside circuit execute for {self=}.{circuit=}")
         if qml.active_return():
             return self._execute_new(circuit, **kwargs)
 
@@ -377,9 +377,9 @@ class QubitDevice(Device):
 
         # generate computational basis samples
         if self.shots is not None or circuit.is_sampled:
-            print("  generating samples")
+            print("     generating samples")
             self._samples = self.generate_samples()
-        print("  generated samples")
+        print("     generated samples")
         
         ret_types = [m.return_type for m in circuit.measurements]
         counts_exist = any(
@@ -430,7 +430,7 @@ class QubitDevice(Device):
         if self.tracker.active:
             self.tracker.update(executions=1, shots=self._shots)
             self.tracker.record()
-
+        print("     DONE executing circuit")
         return results
 
     def shot_vec_statistics(self, circuit):
@@ -612,8 +612,8 @@ class QubitDevice(Device):
         Returns:
             list[array[float]]: list of measured value(s)
         """
-        print(f"inside _qubit_debive batch execute called with {circuits=}")
-        print(f"this qubit device has prng_key={self._prng_key}")
+        print(f"   inside _qubit_debive batch execute called with {circuits=}")
+        print(f"   this qubit device has prng_key={self._prng_key}")
         # TODO: This method and the tests can be globally implemented by Device
         # once it has the same signature in the execute() method
         if qml.active_return():
@@ -621,22 +621,22 @@ class QubitDevice(Device):
 
         results = []
         for circuit in circuits:
-            print("resetting self")
+            print("   resetting self")
             # we need to reset the device here, else it will
             # not start the next computation in the zero state
             self.reset()
 
             # TODO: Insert control on value here
-            print("executing the circuit")
+            print("   executing the circuit")
             res = self.execute(circuit)
             results.append(res)
-        print("done part 1")
+        print("   Done executing circuits")
         if self.tracker.active:
-            print("updating the tracker")
+            print("   updating the tracker")
             self.tracker.update(batches=1, batch_len=len(circuits))
-            print("reconrding")
+            print("   reconrding")
             self.tracker.record()
-        print("returning from the device batch execute")
+        print("   returning from the device batch execute")
         return results
 
     @abc.abstractmethod

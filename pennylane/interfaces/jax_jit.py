@@ -176,9 +176,9 @@ def _execute(
                 """Compute the VJP in a non-differentiable manner."""
                 p = args[:-1]
                 dy = args[-1]
-                print("in non_diff wrapper", tapes)
+                print(f"INSIDE THE non_diff_wrapper CALLBACK, EXECUTING PYTHON CODE. Called with {args=}")
                 new_tapes = [cp_tape(t, a) for t, a in zip(tapes, p)]
-                print("before batch vjp")
+                print(" before batch vjp")
                 vjp_tapes, processing_fn = qml.gradients.batch_vjp(
                     new_tapes,
                     dy,
@@ -186,11 +186,11 @@ def _execute(
                     reduction="append",
                     gradient_kwargs=gradient_kwargs,
                 )
-                print("after batch vjp, ", vjp_tapes)
+                print(" after batch vjp, ", vjp_tapes)
                 partial_res = execute_fn(vjp_tapes)[0]
-                print("after execute")
+                print(" after execute")
                 res = processing_fn(partial_res)
-                print("after process")
+                print(" after process")
                 return np.concatenate(res)
 
             args = tuple(params) + (g,)

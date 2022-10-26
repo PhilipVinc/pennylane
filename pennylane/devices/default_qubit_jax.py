@@ -204,8 +204,8 @@ class DefaultQubitJax(DefaultQubit):
         Returns:
             List[int]: the sampled basis states
         """
-        print(f"    - Sampling basis states for a jax qubit device with {self._prng_key=}")
-        print("    - IF THE PRNG KEY ABOVE IS A TRACER, THIS WILL CRASH!")
+        print(f"      - Sampling basis states for a jax qubit device with {self._prng_key=}")
+        print("      - IF THE PRNG KEY ABOVE IS A TRACER, THIS WILL CRASH!")
         if self.shots is None:
 
             raise qml.QuantumFunctionError(
