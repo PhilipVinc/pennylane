@@ -151,7 +151,7 @@ def _execute(
             return res
 
         shape_dtype_structs = _extract_shape_dtype_structs(tapes, device)
-        res = host_callback.call(wrapper, params, result_shape=shape_dtype_structs)
+        res = jax.pure_callback(wrapper, shape_dtype_structs, params)
         return res
 
     def wrapped_exec_fwd(params):
@@ -180,10 +180,10 @@ def _execute(
                 return np.concatenate(res)
 
             args = tuple(params) + (g,)
-            vjps = host_callback.call(
+            vjps = jax.pure_callback(
                 non_diff_wrapper,
+                jax.ShapeDtypeStruct((total_params,), dtype),
                 args,
-                result_shape=jax.ShapeDtypeStruct((total_params,), dtype),
             )
 
             param_idx = 0
@@ -220,7 +220,7 @@ def _execute(
             jax.ShapeDtypeStruct((len(t.measurements), len(p)), dtype)
             for t, p in zip(tapes, params)
         ]
-        jacs = host_callback.call(jacs_wrapper, params, result_shape=shapes)
+        jacs = jax.pure_callback(jacs_wrapper, shapes, params, vectorized=True)
         vjps = [qml.gradients.compute_vjp(d, jac) for d, jac in zip(g, jacs)]
         res = [[jnp.array(p) for p in v] for v in vjps]
         return (tuple(res),)
@@ -267,10 +267,11 @@ def _execute_with_fwd(
             o = jax.ShapeDtypeStruct(tuple(shape), _dtype)
             jacobian_shape.append(o)
 
-        res, jacs = host_callback.call(
+        res, jacs = jax.pure_callback(
             wrapper,
+            tuple([fwd_shape_dtype_struct, jacobian_shape]),
             params,
-            result_shape=tuple([fwd_shape_dtype_struct, jacobian_shape]),
+            vectorized=True
         )
         return res, jacs
 
@@ -434,7 +435,8 @@ def _execute_bwd_new(
             return res
 
         shape_dtype_structs = _extract_shape_dtype_structs(tapes, device)
-        res = host_callback.call(wrapper, params, result_shape=shape_dtype_structs)
+        #res = host_callback.call(wrapper, params, result_shape=shape_dtype_structs)
+        res = jax.pure_callback(wrapper, shape_dtype_structs, params, vectorized=True)
         return res
 
     @execute_wrapper.defjvp
