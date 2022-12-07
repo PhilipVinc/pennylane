@@ -137,6 +137,13 @@ def _extract_shape_dtype_structs(tapes, device):
 
     return shape_dtypes
 
+def tree_size(tree) -> int:
+    """
+    Returns the sum of the size of all leaves in the tree.
+    It's equivalent to the number of scalars in the pytree.
+    """
+    return sum(jax.tree_util.tree_leaves(jax.tree_util.tree_map(lambda x: x.size, tree)))
+
 
 def _execute(
     params,
@@ -147,7 +154,10 @@ def _execute(
     gradient_kwargs=None,
     _n=1,
 ):  # pylint: disable=dangerous-default-value,unused-argument
-    total_params = np.sum([len(p) for p in params])
+    total_params = tree_size(params)
+
+    _result_shapes_dtypes = _extract_shape_dtype_structs(tapes, device)
+    _n_params = sum(t.num_params for t in tapes)
 
     # Copy a given tape with operations and set parameters
     def cp_tape(t, a):
@@ -203,6 +213,9 @@ def _execute(
                         "return multiple probabilities."
                     )
 
+            n_batches = total_params//_n_params
+            out_shape = jax.ShapeDtypeStruct((n_batches, _n_params), dtype)
+
             def non_diff_wrapper(args):
                 """Compute the VJP in a non-differentiable manner."""
                 p = args[:-1]
@@ -224,8 +237,8 @@ def _execute(
             args = tuple(params) + (g,)
             vjps = jax.pure_callback(
                 non_diff_wrapper,
-                jax.ShapeDtypeStruct((total_params,), dtype),
-                args,
+                out_shape,
+                args, vectorized=False
             )
 
             param_idx = 0
@@ -233,7 +246,7 @@ def _execute(
 
             # Group the vjps based on the parameters of the tapes
             for p in params:
-                param_vjp = vjps[param_idx : param_idx + len(p)]
+                param_vjp = vjps[...,param_idx : param_idx + len(p)]
                 res.append(param_vjp)
                 param_idx += len(p)
 
@@ -247,9 +260,11 @@ def _execute(
             # dtype=float32), DeviceArray(0., dtype=float32)]].
             need_unstacking = any(r.ndim != 0 for r in res)
             if need_unstacking:
-                res = [qml.math.unstack(x) for x in res]
+                res = [[x[...,i] for i in range(x.shape[-1])] for x in res]
 
-            return (tuple(res),)
+            out = jax.tree_map(lambda r,par: r.reshape(par.shape), tuple(res), params)
+
+            return (out,)
 
         def jacs_wrapper(p):
             """Compute the jacs"""
@@ -262,7 +277,7 @@ def _execute(
             jax.ShapeDtypeStruct((len(t.measurements), len(p)), dtype)
             for t, p in zip(tapes, params)
         ]
-        jacs = jax.pure_callback(jacs_wrapper, shapes, params)
+        jacs = jax.pure_callback(jacs_wrapper, shapes, params, vectorized=True)
         vjps = [qml.gradients.compute_vjp(d, jac) for d, jac in zip(g, jacs)]
         res = [[jnp.array(p) for p in v] for v in vjps]
         return (tuple(res),)
