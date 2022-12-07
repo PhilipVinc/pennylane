@@ -232,13 +232,17 @@ def _execute(
 
                 partial_res = execute_fn(vjp_tapes)[0]
                 res = processing_fn(partial_res)
-                return np.concatenate(res)
+                res = np.concatenate(res)
+                if res.size > out_shape.size:
+                    vmap_batches_ = res.size // out_shape.size
+                    res = res.reshape(vmap_batches_, *out_shape.shape)
+                return res
 
             args = tuple(params) + (g,)
             vjps = jax.pure_callback(
                 non_diff_wrapper,
                 out_shape,
-                args, vectorized=False
+                args, vectorized=True
             )
 
             param_idx = 0
