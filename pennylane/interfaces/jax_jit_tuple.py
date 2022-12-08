@@ -213,7 +213,7 @@ def _execute_bwd_tuple(
             # reshape to target output: first vmap dimensions then the others.
             if vmap_dims is not None:
                 res = jax.tree_map(
-                    lambda x, y: x.reshape(*vmap_dims, *y.shape), res, shape_dtype_structs
+                    lambda x, y: x.reshape(vmap_dims + y.shape), res, shape_dtype_structs
                 )
 
             return res

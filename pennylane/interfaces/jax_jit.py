@@ -227,7 +227,7 @@ def _execute(
                         res[i] = np.moveaxis(res[i], 0, -1 - n_broadcast_dims)
 
                 res = jax.tree_map(
-                    lambda x, y: x.reshape(*vmap_dims, *y.shape), res, result_shapes_dtypes
+                    lambda x, y: x.reshape(vmap_dims + y.shape), res, result_shapes_dtypes
                 )
 
             return res
