@@ -1642,7 +1642,7 @@ class TestJIT:
             )
 
         phys_qubits = 2
-        n_configs = 5
+        n_configs = 12
         pars_q = np.random.rand(n_configs, 2)
 
         dev = qml.device(dev_name, wires=tuple(range(phys_qubits)), shots=None)
@@ -1661,6 +1661,13 @@ class TestJIT:
         assert np.allclose(
             jax.jit(minimal_circ)(pars_q), jax.jit(jax.vmap(minimal_circ))(pars_q), tol
         )
+
+        pars_q_r = pars_q.reshape(n_configs // 3, 3, 2)
+        res_r = jax.jit(minimal_circ)(pars_q).reshape(n_configs // 3, 3)
+        # vmap + implicit broadcast
+        assert np.allclose(res_r, jax.jit(jax.vmap(minimal_circ))(pars_q_r), tol)
+        # vmap + vmap
+        assert np.allclose(res_r, jax.jit(jax.vmap(jax.vmap(minimal_circ)))(pars_q_r), tol)
 
     def test_vmap_compared_param_broadcasting_multi_output(self, dev_name, diff_method, mode, tol):
         """Test that jax.vmap works just as well as parameter-broadcasting with JAX JIT on the forward pass when
