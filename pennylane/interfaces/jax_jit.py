@@ -202,16 +202,11 @@ def _execute(
     gradient_kwargs=None,
     _n=1,
 ):  # pylint: disable=dangerous-default-value,unused-argument
-    print(f"{params=}")
-    print("param length:", [[pp.shape for pp in p] for p in params])
-    # total_params = np.sum([len(p) for p in params])
     total_params = tree_size(params)
-    print(f"but total param is {total_params}")
     tapes_store.append(tapes)
 
     _result_shapes_dtypes = _extract_shape_dtype_structs(tapes, device)
     _n_params = sum(t.num_params for t in tapes)
-    print(f"but {_result_shapes_dtypes=} {_n_params=}")
 
     @jax.custom_vjp
     def wrapped_exec(params):
