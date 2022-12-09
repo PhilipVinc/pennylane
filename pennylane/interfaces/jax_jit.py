@@ -141,6 +141,50 @@ def _extract_shape_dtype_structs(tapes, device):
     return shape_dtypes
 
 
+def _extract_param_shape(tapes):
+    """Auxiliary function for defining the shape of the parameters of a tape,
+    without batch dimensions.
+    """
+    shape_dtypes = []
+    for t in tapes:
+        batch_dims = 0 if t.batch_size is None else 1
+        st = jax.tree_map(
+            lambda x: jax.ShapeDtypeStruct(x.shape[batch_dims:], x.dtype),
+            t.get_parameters(),
+        )
+        shape_dtypes.append(st)
+    return tuple(shape_dtypes)
+
+
+def _estimate_n_vmap_dims(tapes, params, params_bare_shape_t):
+    vmap_dims_t = []
+    for t, p, bare_shapes in zip(tapes, params, params_bare_shape_t):
+        par_leaves = jax.tree_util.tree_leaves(p)
+        if len(par_leaves) > 0:
+            par_0 = par_leaves[0]
+            par_dims, par_ndims = par_0.shape, par_0.ndim
+
+            bare_dims = jax.tree_util.tree_leaves(bare_shapes)[0].ndim
+
+            # remove implicit broadcast dimension if any
+            n_broadcast_dims = 0 if t.batch_size is None else 1
+            vmap_dims_t.append(par_dims[: par_ndims - bare_dims - n_broadcast_dims])
+        else:
+            vmap_dims_t.append(())
+    return vmap_dims_t
+
+    # remove implicit broadcast dimension if any
+    if d > 0:
+        vmap_dims = vmap_dims[:-d]
+
+
+# Copy a given tape with operations and set parameters
+def _cp_tape(t, a):
+    tc = t.copy(copy_operations=True)
+    tc.set_parameters(a)
+    return tc
+
+
 def tree_size(tree) -> int:
     """
     Returns the sum of the size of all leaves in the tree.
@@ -169,68 +213,40 @@ def _execute(
     _n_params = sum(t.num_params for t in tapes)
     print(f"but {_result_shapes_dtypes=} {_n_params=}")
 
-    # Copy a given tape with operations and set parameters
-    def cp_tape(t, a):
-        tc = t.copy(copy_operations=True)
-        tc.set_parameters(a)
-        return tc
-
     @jax.custom_vjp
     def wrapped_exec(params):
         result_shapes_dtypes = _extract_shape_dtype_structs(tapes, device)
 
-        # Brutally estimate the number of implicitly broadcasted dims
-        # Note: this assumes that all non-broadcasted params are scalars
-        # (is this correct?)
-        leaves = jax.tree_util.tree_leaves(params)
-        n_broadcast_dims = leaves[0].ndim if len(leaves) > 0 else 0
+        n_broadcast_dims = [0 if t.batch_size is None else 1 for t in tapes]
+        params_bare_shape_t = _extract_param_shape(tapes)
 
         def wrapper(p):
             """Compute the forward pass."""
 
             # compute number of explicitly broadcasted (vmapped) dims
-            leaves = jax.tree_util.tree_leaves(p)
-            if len(leaves) > 0:
-                # extract the vmapped dims. But this also includes
-                # the eventually implicitly broadcasted dimension
-                vmap_dims = jax.tree_util.tree_leaves(p)[0].shape
-
-                # remove implicit broadcast dimension if any
-                if n_broadcast_dims > 0:
-                    vmap_dims = vmap_dims[:-n_broadcast_dims]
-
-                # flatten the parameters: devices do not support implicit broadcast
-                # along more than 1 dimension
-                p = jax.tree_map(lambda x: x.reshape(-1), p)
-            else:
-                vmap_dims = None
-
-            new_tapes = [cp_tape(t, a) for t, a in zip(tapes, p)]
+            vmap_dims_t = _estimate_n_vmap_dims(tapes, p, params_bare_shape_t)
+            print("FF: ", jax.tree_map(lambda x: (x.shape, x.dtype), p))
+            print("FF: ", jax.tree_map(lambda x: (x.shape, x.dtype), params_bare_shape_t))
+            print("VMAP DIMS: ", vmap_dims_t)
+            print("n_broadcast_dims: ", n_broadcast_dims)
+            p = jax.tree_map(lambda x, s: x.reshape(-1, *s.shape), p, params_bare_shape_t)
+            print("new p:", jax.tree_map(lambda x: x.shape, p))
+            new_tapes = [_cp_tape(t, a) for t, a in zip(tapes, p)]
             with qml.tape.Unwrap(*new_tapes):
                 res, _ = execute_fn(new_tapes, **gradient_kwargs)
 
             # When executed under `jax.vmap` the `result_shapes_dtypes` will contain
-            # the shape without the vmap dimensions, while the function here will be
-            # executed with objects containing the vmap dimensions. So res[i].ndim
-            # will have an extra dimension for every `jax.vmap` wrapping this execution.
-            #
-            # The execute_fn will return an object with shape `(n_observables, batches)`
-            # but the default behaviour for `jax.pure_callback` is to add the extra
-            # dimension at the beginning, so `(batches, n_observables)`. So in here
-            # we detect with the heuristic above if we are executing under vmap and we
-            # swap the order in that case.
-
-            # pylint: disable=consider-using-enumerate
-            if vmap_dims is not None:
+            res_out = []
+            for r, vmap_dims, res_shape, n_implicit_dims in zip(
+                res, vmap_dims_t, result_shapes_dtypes, n_broadcast_dims
+            ):
                 if len(vmap_dims) > 0:
-                    for i in range(len(res)):
-                        res[i] = np.moveaxis(res[i], 0, -1 - n_broadcast_dims)
-
+                    r = np.moveaxis(r, 0, -1 - n_implicit_dims)
+                r = r.reshape(vmap_dims + res_shape.shape)
+                res_out.append(r)
                 res = jax.tree_map(
-                    lambda x, y: x.reshape(vmap_dims + y.shape), res, result_shapes_dtypes
-                )
 
-            return res
+            return res_out
 
         res = jax.pure_callback(wrapper, result_shapes_dtypes, params, vectorized=True)
         return res
@@ -270,7 +286,7 @@ def _execute(
                 print(f"==>p  is: {p =}")
                 print(f"==>dy is: {dy=}")
 
-                new_tapes = [cp_tape(t, a) for t, a in zip(tapes, p)]
+                new_tapes = [_cp_tape(t, a) for t, a in zip(tapes, p)]
                 vjp_tapes, processing_fn = qml.gradients.batch_vjp(
                     new_tapes,
                     dy,
@@ -356,7 +372,7 @@ def _execute(
 
         def jacs_wrapper(p):
             """Compute the jacs"""
-            new_tapes = [cp_tape(t, a) for t, a in zip(tapes, p)]
+            new_tapes = [_cp_tape(t, a) for t, a in zip(tapes, p)]
             with qml.tape.Unwrap(*new_tapes):
                 jacs = gradient_fn(new_tapes, **gradient_kwargs)
             return jacs
