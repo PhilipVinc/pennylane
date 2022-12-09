@@ -185,7 +185,7 @@ def _cp_tape(t, a):
     return tc
 
 
-def tree_size(tree) -> int:
+def _tree_size(tree) -> int:
     """
     Returns the sum of the size of all leaves in the tree.
     It's equivalent to the number of scalars in the pytree.
@@ -202,10 +202,9 @@ def _execute(
     gradient_kwargs=None,
     _n=1,
 ):  # pylint: disable=dangerous-default-value,unused-argument
-    total_params = tree_size(params)
+    total_params = _tree_size(params)
     tapes_store.append(tapes)
 
-    _result_shapes_dtypes = _extract_shape_dtype_structs(tapes, device)
     _n_params = sum(t.num_params for t in tapes)
 
     @jax.custom_vjp
@@ -220,7 +219,9 @@ def _execute(
 
             # compute number of explicitly broadcasted (vmapped) dims
             vmap_dims_t = _estimate_n_vmap_dims(tapes, p, params_bare_shape_t)
+            # concatenate vmapped and broadcasted dimensions
             p = jax.tree_map(lambda x, s: x.reshape(-1, *s.shape), p, params_bare_shape_t)
+
             new_tapes = [_cp_tape(t, a) for t, a in zip(tapes, p)]
             with qml.tape.Unwrap(*new_tapes):
                 res, _ = execute_fn(new_tapes, **gradient_kwargs)
