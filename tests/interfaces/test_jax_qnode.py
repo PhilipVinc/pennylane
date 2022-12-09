@@ -1658,34 +1658,24 @@ class TestJIT:
             res = _measure_operator()
             return res
 
+        # jit vs non-jit
+        assert np.allclose(
+            minimal_circ(pars_q[0]), jax.jit(minimal_circ)(pars_q[0]), tol
+        )
+        # jit vs vmap[0]
+        assert np.allclose(
+            jax.jit(minimal_circ)(pars_q[0]), jax.jit(jax.vmap(minimal_circ))(pars_q)[0], tol
+        )
+        # broadcast vs vmap
         assert np.allclose(
             jax.jit(minimal_circ)(pars_q), jax.jit(jax.vmap(minimal_circ))(pars_q), tol
         )
-
         pars_q_r = pars_q.reshape(n_configs // 3, 3, 2)
         res_r = jax.jit(minimal_circ)(pars_q).reshape(n_configs // 3, 3)
         # vmap + implicit broadcast
         assert np.allclose(res_r, jax.jit(jax.vmap(minimal_circ))(pars_q_r), tol)
         # vmap + vmap
         assert np.allclose(res_r, jax.jit(jax.vmap(jax.vmap(minimal_circ)))(pars_q_r), tol)
-
-    def test_vmap_compared_param_broadcasting_multi_output(self, dev_name, diff_method, mode, tol):
-        """Test that jax.vmap works just as well as parameter-broadcasting with JAX JIT on the forward pass when
-        vectorized=True is specified for the callback when caching is disabled and when multiple output values
-        are returned."""
-        if diff_method == "adjoint":
-            pytest.skip("The adjoint method does not yet support Hamiltonians")
-
-        if diff_method == "backprop":
-            pytest.skip(
-                "The backprop method does not yet support parameter-broadcasting with Hamiltonians"
-            )
-
-        phys_qubits = 2
-        n_configs = 5
-        pars_q = np.random.rand(n_configs, 2)
-
-        dev = qml.device(dev_name, wires=tuple(range(phys_qubits)), shots=None)
 
         def minimal_circ(params):
             @qml.qnode(dev, interface="jax-jit", diff_method=diff_method, mode=mode, cache=None)
@@ -1699,8 +1689,82 @@ class TestJIT:
             res = _measure_operator()
             return res
 
+
+        # jit vs non-jit
+        assert np.allclose(
+            minimal_circ(pars_q[0]), jax.jit(minimal_circ)(pars_q[0]), tol
+        )
+        # jit vs vmap[0]
+        assert np.allclose(
+            jax.jit(minimal_circ)(pars_q[0]), jax.jit(jax.vmap(minimal_circ))(pars_q)[0], tol
+        )
+        # broadcast vs vmap
         # Jax and Pennylane have a different convention on how they return expectation values.
         # This will no longer be an issue in the new return types interface.
         assert np.allclose(
             jax.jit(minimal_circ)(pars_q), jax.jit(jax.vmap(minimal_circ))(pars_q).T, tol
         )
+
+
+        def minimal_circ(params):
+            @qml.qnode(dev, interface="jax-jit", diff_method=diff_method, mode=mode, cache=None)
+            def _measure_operator():
+                qml.RY(params[..., 0], wires=0)
+                qml.RY(params[..., 1], wires=1)
+                op1 = qml.Hamiltonian([1.0], [qml.PauliZ(0) @ qml.PauliZ(1)])
+                op2 = qml.Hamiltonian([1.0], [qml.PauliX(0) @ qml.PauliX(1)])
+                return qml.probs(wires=[0, 1])
+
+            res = _measure_operator()
+            return res
+
+        # jit vs non-jit
+        assert np.allclose(
+            minimal_circ(pars_q[0]), jax.jit(minimal_circ)(pars_q[0]), tol
+        )
+        # jit vs vmap[0]
+        assert np.allclose(
+            jax.jit(minimal_circ)(pars_q[0]), jax.jit(jax.vmap(minimal_circ))(pars_q)[0], tol
+        )
+        # broadcast vs vmap
+        assert np.allclose(
+            jax.jit(minimal_circ)(pars_q), jax.jit(jax.vmap(minimal_circ))(pars_q), tol
+        )
+        res_r = jax.jit(minimal_circ)(pars_q).reshape(n_configs // 3, 3, -1)
+        # vmap + implicit broadcast
+        assert np.allclose(res_r, jax.jit(jax.vmap(minimal_circ))(pars_q_r), tol)
+        # vmap + vmap
+        assert np.allclose(res_r, jax.jit(jax.vmap(jax.vmap(minimal_circ)))(pars_q_r), tol)
+
+
+        a = jax.numpy.stack([np.array(0.1) for _ in range(n_configs)])
+        U = jax.numpy.stack([np.array([[0, 1], [1, 0]]) for _ in range(n_configs)])
+        a_r = a.reshape(n_configs//3, 3)
+        U_r = U.reshape(n_configs//3, 3, 2, 2)
+
+        def minimal_circ(a,U):
+            @qml.qnode(dev, interface="jax-jit", diff_method=diff_method, mode=mode, cache=None)
+            def _measure_operator():
+                qml.QubitUnitary(U, wires=0)
+                qml.RY(a, wires=0)
+                return qml.expval(qml.PauliZ(0))
+
+            res = _measure_operator()
+            return res
+
+        # jit vs non-jit
+        assert np.allclose(
+            minimal_circ(a[0],U[0]), jax.jit(minimal_circ)(a[0],U[0]), tol
+        )
+        # jit vs vmap[0]
+        assert np.allclose(
+            jax.jit(minimal_circ)(a[0],U[0]), jax.jit(jax.vmap(minimal_circ))(a,U)[0], tol
+        )
+        assert np.allclose(
+            jax.jit(minimal_circ)(a,U), jax.jit(jax.vmap(minimal_circ))(a,U), tol
+        )
+        res_r = jax.jit(minimal_circ)(a,U).reshape(n_configs // 3, 3)
+        ## vmap + implicit broadcast
+        assert np.allclose(res_r, jax.jit(jax.vmap(minimal_circ))(a_r,U_r), tol)
+        ## vmap + vmap
+        assert np.allclose(res_r, jax.jit(jax.vmap(jax.vmap(minimal_circ)))(a_r, U_r), tol)

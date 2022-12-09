@@ -232,9 +232,7 @@ def _execute(
             ):
                 if len(vmap_dims) > 0:
                     r = np.moveaxis(r, 0, -1 - n_implicit_dims)
-                r = r.reshape(vmap_dims + res_shape.shape)
-                res_out.append(r)
-                res = jax.tree_map(
+                res_out.append(r.reshape(vmap_dims + res_shape.shape))
 
             return res_out
 
