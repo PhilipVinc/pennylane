@@ -225,12 +225,7 @@ def _execute(
 
             # compute number of explicitly broadcasted (vmapped) dims
             vmap_dims_t = _estimate_n_vmap_dims(tapes, p, params_bare_shape_t)
-            print("FF: ", jax.tree_map(lambda x: (x.shape, x.dtype), p))
-            print("FF: ", jax.tree_map(lambda x: (x.shape, x.dtype), params_bare_shape_t))
-            print("VMAP DIMS: ", vmap_dims_t)
-            print("n_broadcast_dims: ", n_broadcast_dims)
             p = jax.tree_map(lambda x, s: x.reshape(-1, *s.shape), p, params_bare_shape_t)
-            print("new p:", jax.tree_map(lambda x: x.shape, p))
             new_tapes = [_cp_tape(t, a) for t, a in zip(tapes, p)]
             with qml.tape.Unwrap(*new_tapes):
                 res, _ = execute_fn(new_tapes, **gradient_kwargs)
@@ -252,12 +247,7 @@ def _execute(
         return res
 
     def wrapped_exec_fwd(params):
-        print("\n\n======================================================================\n\n")
-        print(f"FORWARD pass for:\n {params=}\n\n")
         res = wrapped_exec(params)
-        print(f"forward pass res is: {res=} with shapes: ")
-        for i, r in enumerate(res):
-            print(f" res[{i}] = shape={r.shape} vals: {r}")
         return res, params
 
     def wrapped_exec_bwd(params, g):
