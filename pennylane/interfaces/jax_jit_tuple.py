@@ -23,7 +23,7 @@ import jax.numpy as jnp
 import pennylane as qml
 from pennylane.interfaces import InterfaceUnsupportedError
 from pennylane.interfaces.jax import _compute_jvps
-from pennylane.interfaces.jax_jit import _validate_jax_version, _numeric_type_to_dtype
+from pennylane.interfaces.jax_jit import _validate_jax_version, _numeric_type_to_dtype,_estimate_n_vmap_dims,_extract_param_shape,_tree_size
 
 dtype = jnp.float64
 
@@ -180,43 +180,31 @@ def _execute_bwd_tuple(
     def execute_wrapper(params):
         shape_dtype_structs = _tapes_shape_dtype_tuple(tapes, device)
 
-        # Brutally estimate the number of implicitly broadcasted dims
-        # Note: this assumes that all non-broadcasted params are scalars
-        # (is this correct?)
-        leaves = jax.tree_util.tree_leaves(params)
-        n_broadcast_dims = leaves[0].ndim if len(leaves) > 0 else 0
+        n_broadcast_dims = tuple(0 if t.batch_size is None else 1 for t in tapes)
+        params_bare_shape_t = _extract_param_shape(tapes)
 
         def wrapper(p):
             """Compute the forward pass."""
 
-            # compute number of explicitly broadcasted dims
-            leaves = jax.tree_util.tree_leaves(p)
-            if len(leaves) > 0:
-                # extract the vmapped dims. But this also includes
-                # the eventually implicitly broadcasted dimension
-                vmap_dims = jax.tree_util.tree_leaves(p)[0].shape
-
-                # remove implicit broadcast dimension if any
-                if n_broadcast_dims > 0:
-                    vmap_dims = vmap_dims[:-n_broadcast_dims]
-
-                # flatten the parameters: devices do not support implicit broadcast
-                # along more than 1 dimension
-                p = jax.tree_map(lambda x: x.reshape(-1), p)
-            else:
-                vmap_dims = None
+            # compute number of explicitly broadcasted (vmapped) dims
+            vmap_dims_t = _estimate_n_vmap_dims(tapes, p, params_bare_shape_t)
+            # concatenate vmapped and broadcasted dimensions
+            p = jax.tree_map(lambda x, s: x.reshape(-1, *s.shape), p, params_bare_shape_t)
 
             new_tapes = [_copy_tape(t, a) for t, a in zip(tapes, p)]
             with qml.tape.Unwrap(*new_tapes):
                 res, _ = execute_fn(new_tapes, **gradient_kwargs)
 
-            # reshape to target output: first vmap dimensions then the others.
-            if vmap_dims is not None:
-                res = jax.tree_map(
-                    lambda x, y: x.reshape(vmap_dims + y.shape), res, shape_dtype_structs
-                )
+            # When executed under `jax.vmap` the `result_shapes_dtypes` will contain
+            res_out = []
+            for r, r_shape, vmap_dims in zip(
+                res, shape_dtype_structs, vmap_dims_t
+            ):
+                res_out.append(jax.tree_map(
+                    lambda r, shp: r.reshape(vmap_dims + shp.shape), r, r_shape
+                ))
 
-            return res
+            return res_out
 
         res = jax.pure_callback(wrapper, shape_dtype_structs, params, vectorized=True)
         return res
