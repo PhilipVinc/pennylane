@@ -721,7 +721,7 @@ def expval_param_shift(
                 grads.append(g)
                 continue
 
-            res = results[start : start + num_tapes] if batch_size is None else results[start]
+            res = results[start : start + num_tapes] #if batch_size is None else results[start]
             start = start + num_tapes
 
             g = _evaluate_gradient(res, data, broadcast, r0, scalar_qfunc_output)

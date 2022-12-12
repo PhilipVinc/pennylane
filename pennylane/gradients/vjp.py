@@ -253,7 +253,12 @@ def compute_vjp(dy, jac, num=None):
             return qml.math.cast_like(res, dy)
     except (AttributeError, TypeError):
         pass
-    return qml.math.tensordot(jac, dy_row, [[0], [0]])
+    new_shape = [1 for _ in range(jac.ndim)]
+    new_shape[0] = dy_row.shape[0]
+    new_shape = tuple(new_shape)
+    dy_row_r = dy_row.reshape(new_shape)
+    res = jac * dy_row_r
+    return res
 
 
 def vjp(tape, dy, gradient_fn, shots=None, gradient_kwargs=None):
